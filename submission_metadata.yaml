@@ -1,0 +1,26 @@
+# Template metadata for Redrob Intelligent Candidate Discovery submission.
+
+project_name: TalentRank Intelligence
+version: 0.1.0
+submission_file: submission.csv
+entrypoint: python rank.py --input candidates.jsonl --output submission.csv
+
+runtime:
+  target_minutes_cpu: 5
+  memory_limit_gb: 16
+  network_required_during_ranking: false
+  hosted_llm_calls_during_ranking: false
+
+reproducibility:
+  deterministic: true
+  random_seed: 20260622
+  notes:
+    - TODO: Document exact Python version and dependency lockfile.
+    - TODO: Document feature extraction and scoring configuration hash.
+
+method:
+  summary: TODO
+  features: []
+  scoring: TODO
+  penalties: TODO
+  explainability: TODO

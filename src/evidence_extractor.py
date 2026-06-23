@@ -382,7 +382,13 @@ def _match_terms(raw: dict[str, Any], terms: set[str]) -> list[tuple[str, str, s
 
 
 def _contains_term(text: str, term: str) -> bool:
-    return re.search(rf"(?<!\w){re.escape(term.lower())}(?!\w)", text.lower()) is not None
+    lowered_text = text.lower()
+    lowered_term = term.lower()
+    if lowered_term not in lowered_text:
+        return False
+    if len(lowered_term) <= 3:
+        return re.search(rf"(?<!\w){re.escape(lowered_term)}(?!\w)", lowered_text) is not None
+    return True
 
 
 def _contains_any(text: str, terms: set[str]) -> bool:

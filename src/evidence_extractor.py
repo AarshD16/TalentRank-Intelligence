@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from src.normalization import NormalizedCandidate
@@ -176,6 +176,20 @@ RECENT_LLM_DEMO_TERMS = {
     "played with",
 }
 
+SHORT_TERM_PATTERNS = {
+    term: re.compile(rf"(?<!\w){re.escape(term.lower())}(?!\w)")
+    for term in {
+        "ai",
+        "ml",
+        "ir",
+        "api",
+        "rag",
+        "mrr",
+        "map",
+        "oss",
+    }
+}
+
 SERVICES_COMPANIES = {
     "tcs",
     "infosys",
@@ -222,48 +236,61 @@ def extract_evidence(candidate: NormalizedCandidate | dict[str, Any]) -> Evidenc
         raise ValueError("Candidate profile is missing candidate_id.")
 
     LOGGER.debug("Extracting evidence for candidate_id=%s", candidate_id)
+    fields = _field_texts(raw)
+    production_ai = _production_ai_experience(raw, fields)
+    pre_llm_ml = _pre_llm_ml_experience_signal(raw)
     signals = {
         "total_years_experience": _total_years(raw),
         "ai_ml_title_strength": _ai_ml_title_strength(raw),
         "seniority_strength": _seniority_strength(raw),
-        "production_ai_experience": _production_ai_experience(raw),
+        "production_ai_experience": production_ai,
         "retrieval_search_ranking_experience": _keyword_signal(
             raw,
             "retrieval_search_ranking_experience",
             RETRIEVAL_SEARCH_RANKING_TERMS,
             ("profile.summary", "profile.headline", "career_history[].description", "skills[].name"),
+            fields,
         ),
         "vector_database_experience": _keyword_signal(
             raw,
             "vector_database_experience",
             VECTOR_DATABASE_TERMS,
             ("profile.summary", "career_history[].description", "skills[].name", "redrob_signals.skill_assessment_scores"),
+            fields,
         ),
         "evaluation_framework_experience": _keyword_signal(
             raw,
             "evaluation_framework_experience",
             EVALUATION_TERMS,
             ("profile.summary", "career_history[].description", "skills[].name"),
+            fields,
         ),
-        "python_strength": _python_strength(raw),
+        "python_strength": _python_strength(raw, fields),
         "product_company_experience": _product_company_experience(raw),
         "services_only_penalty_signal": _services_only_penalty_signal(raw),
         "recent_hands_on_coding_signal": _recent_hands_on_coding_signal(raw),
-        "llm_only_recent_demo_signal": _llm_only_recent_demo_signal(raw),
-        "pre_llm_ml_experience_signal": _pre_llm_ml_experience_signal(raw),
+        "llm_only_recent_demo_signal": _llm_only_recent_demo_signal(
+            raw,
+            fields,
+            production_ai_value=production_ai.value,
+            pre_llm_value=pre_llm_ml.value,
+        ),
+        "pre_llm_ml_experience_signal": pre_llm_ml,
         "nlp_ir_relevance": _keyword_signal(
             raw,
             "nlp_ir_relevance",
             NLP_IR_TERMS,
             ("profile.summary", "profile.headline", "career_history[].description", "skills[].name"),
+            fields,
         ),
         "data_engineering_adjacent_strength": _keyword_signal(
             raw,
             "data_engineering_adjacent_strength",
             DATA_ENGINEERING_TERMS,
             ("profile.summary", "career_history[].description", "skills[].name"),
+            fields,
         ),
-        "open_source_or_github_signal": _open_source_or_github_signal(raw),
+        "open_source_or_github_signal": _open_source_or_github_signal(raw, fields),
         "education_strength": _education_strength(raw),
         "location_fit": _location_fit(raw),
         "notice_period_fit": _notice_period_fit(raw),
@@ -371,28 +398,60 @@ def _field_texts(raw: dict[str, Any]) -> list[tuple[str, str]]:
     return [(field, text) for field, text in fields if text]
 
 
-def _match_terms(raw: dict[str, Any], terms: set[str]) -> list[tuple[str, str, str]]:
+def _match_terms(
+    raw: dict[str, Any],
+    terms: set[str],
+    fields: list[tuple[str, str]] | None = None,
+) -> list[tuple[str, str, str]]:
     matches: list[tuple[str, str, str]] = []
-    for field, text in _field_texts(raw):
+    for field, text in (fields if fields is not None else _field_texts(raw)):
+        lowered_text = text.lower()
         for term in terms:
-            if _contains_term(text, term):
-                matches.append((field, term, _snippet(text, term)))
-                break
+            if term not in lowered_text:
+                continue
+            if len(term) <= 3:
+                pattern = SHORT_TERM_PATTERNS.get(term)
+                if pattern is None:
+                    pattern = re.compile(rf"(?<!\w){re.escape(term)}(?!\w)")
+                    SHORT_TERM_PATTERNS[term] = pattern
+                if pattern.search(lowered_text) is None:
+                    continue
+            matches.append((field, term, _snippet(text, term)))
+            break
     return matches
 
 
 def _contains_term(text: str, term: str) -> bool:
-    lowered_text = text.lower()
-    lowered_term = term.lower()
+    return _contains_lowered_term(text.lower(), term)
+
+
+def _contains_lowered_term(lowered_text: str, term: str) -> bool:
+    lowered_term = term
     if lowered_term not in lowered_text:
         return False
     if len(lowered_term) <= 3:
-        return re.search(rf"(?<!\w){re.escape(lowered_term)}(?!\w)", lowered_text) is not None
+        pattern = SHORT_TERM_PATTERNS.get(lowered_term)
+        if pattern is None:
+            pattern = re.compile(rf"(?<!\w){re.escape(lowered_term)}(?!\w)")
+            SHORT_TERM_PATTERNS[lowered_term] = pattern
+        return pattern.search(lowered_text) is not None
     return True
 
 
 def _contains_any(text: str, terms: set[str]) -> bool:
-    return any(_contains_term(text, term) for term in terms)
+    lowered_text = text.lower()
+    for term in terms:
+        if term not in lowered_text:
+            continue
+        if len(term) <= 3:
+            pattern = SHORT_TERM_PATTERNS.get(term)
+            if pattern is None:
+                pattern = re.compile(rf"(?<!\w){re.escape(term)}(?!\w)")
+                SHORT_TERM_PATTERNS[term] = pattern
+            if pattern.search(lowered_text) is None:
+                continue
+        return True
+    return False
 
 
 def _source_matches(pattern: str, field: str) -> bool:
@@ -407,8 +466,9 @@ def _keyword_signal(
     _name: str,
     terms: set[str],
     preferred_sources: tuple[str, ...],
+    fields: list[tuple[str, str]] | None = None,
 ) -> SignalEvidence:
-    matches = _match_terms(raw, terms)
+    matches = _match_terms(raw, terms, fields)
     preferred = [
         item
         for item in matches
@@ -475,11 +535,14 @@ def _seniority_strength(raw: dict[str, Any]) -> SignalEvidence:
     return _signal(value, snippets, sources)
 
 
-def _production_ai_experience(raw: dict[str, Any]) -> SignalEvidence:
+def _production_ai_experience(
+    raw: dict[str, Any],
+    fields: list[tuple[str, str]] | None = None,
+) -> SignalEvidence:
     snippets: list[str] = []
     sources: list[str] = []
     value = 0.0
-    for field, text in _field_texts(raw):
+    for field, text in (fields if fields is not None else _field_texts(raw)):
         lowered = text.lower()
         if _contains_any(lowered, PRODUCTION_TERMS) and _contains_any(lowered, AI_TERMS):
             value += 0.35 if field.startswith("career_history") else 0.22
@@ -493,8 +556,8 @@ def _production_ai_experience(raw: dict[str, Any]) -> SignalEvidence:
     return _signal(value, snippets, sources)
 
 
-def _python_strength(raw: dict[str, Any]) -> SignalEvidence:
-    matches = _match_terms(raw, PYTHON_TERMS)
+def _python_strength(raw: dict[str, Any], fields: list[tuple[str, str]] | None = None) -> SignalEvidence:
+    matches = _match_terms(raw, PYTHON_TERMS, fields)
     value = 0.0
     snippets = [snippet for _field, _term, snippet in matches]
     sources = [field for field, _term, _snippet_text in matches]
@@ -568,13 +631,18 @@ def _recent_hands_on_coding_signal(raw: dict[str, Any]) -> SignalEvidence:
     return _signal(value, [_snippet(text, "built") or text], [source] if source else [])
 
 
-def _llm_only_recent_demo_signal(raw: dict[str, Any]) -> SignalEvidence:
+def _llm_only_recent_demo_signal(
+    raw: dict[str, Any],
+    fields: list[tuple[str, str]] | None = None,
+    production_ai_value: float | None = None,
+    pre_llm_value: float | None = None,
+) -> SignalEvidence:
     snippets: list[str] = []
     sources: list[str] = []
     value = 0.0
-    matches = _match_terms(raw, RECENT_LLM_DEMO_TERMS)
-    has_production_ai = _production_ai_experience(raw).value >= 0.5
-    has_pre_llm = _pre_llm_ml_experience_signal(raw).value >= 0.5
+    matches = _match_terms(raw, RECENT_LLM_DEMO_TERMS, fields)
+    has_production_ai = (production_ai_value if production_ai_value is not None else _production_ai_experience(raw, fields).value) >= 0.5
+    has_pre_llm = (pre_llm_value if pre_llm_value is not None else _pre_llm_ml_experience_signal(raw).value) >= 0.5
     if matches and not has_production_ai and not has_pre_llm:
         value = min(1.0, 0.35 + len(matches) * 0.15)
         snippets = [snippet for _field, _term, snippet in matches]
@@ -607,10 +675,13 @@ def _pre_llm_ml_experience_signal(raw: dict[str, Any]) -> SignalEvidence:
     return _signal(value, snippets, sources)
 
 
-def _open_source_or_github_signal(raw: dict[str, Any]) -> SignalEvidence:
+def _open_source_or_github_signal(
+    raw: dict[str, Any],
+    fields: list[tuple[str, str]] | None = None,
+) -> SignalEvidence:
     signals = _signals(raw)
     github_score = _safe_float(signals.get("github_activity_score"))
-    text_matches = _match_terms(raw, {"open-source", "open source", "oss", "contribution", "pull request"})
+    text_matches = _match_terms(raw, {"open-source", "open source", "oss", "contribution", "pull request"}, fields)
     value = 0.0
     snippets: list[str] = []
     sources: list[str] = []
@@ -766,6 +837,6 @@ def _parse_date(value: Any) -> date | None:
     if not value:
         return None
     try:
-        return datetime.strptime(str(value), "%Y-%m-%d").date()
+        return date.fromisoformat(str(value))
     except ValueError:
         return None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from src.evidence_extractor import Evidence, EvidenceBundle, extract_evidence
@@ -401,7 +401,7 @@ def _parse_date(value: Any) -> date | None:
     if not value:
         return None
     try:
-        return datetime.strptime(str(value), "%Y-%m-%d").date()
+        return date.fromisoformat(str(value))
     except ValueError:
         return None
 

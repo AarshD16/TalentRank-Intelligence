@@ -8,12 +8,14 @@ import heapq
 import logging
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 from src.config import RankingConfig
-from src.io import iter_candidates_jsonl, write_submission_csv
+from src.io import CandidateProfile, iter_candidates_jsonl, write_submission_csv
 from src.reasoning import build_reasoning
 from src.scoring import RankedCandidate, ScoreBreakdown, score_candidate_with_components
 from src.validation import validate_input_path, validate_submission_rows
@@ -43,6 +45,47 @@ class CandidateScore:
     breakdown: ScoreBreakdown
 
 
+@dataclass(slots=True)
+class PipelineTimings:
+    """Simple perf-counter timings for the ranking hot path."""
+
+    read_seconds: float = 0.0
+    score_seconds: float = 0.0
+    heap_seconds: float = 0.0
+    sort_seconds: float = 0.0
+    reasoning_seconds: float = 0.0
+    validation_seconds: float = 0.0
+    write_seconds: float = 0.0
+    debug_seconds: float = 0.0
+    external_validation_seconds: float = 0.0
+
+    def total(self) -> float:
+        return (
+            self.read_seconds
+            + self.score_seconds
+            + self.heap_seconds
+            + self.sort_seconds
+            + self.reasoning_seconds
+            + self.validation_seconds
+            + self.write_seconds
+            + self.debug_seconds
+            + self.external_validation_seconds
+        )
+
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "read": self.read_seconds,
+            "score": self.score_seconds,
+            "heap": self.heap_seconds,
+            "sort": self.sort_seconds,
+            "reasoning": self.reasoning_seconds,
+            "validation": self.validation_seconds,
+            "write": self.write_seconds,
+            "debug": self.debug_seconds,
+            "external_validation": self.external_validation_seconds,
+        }
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -68,6 +111,12 @@ def parse_args() -> argparse.Namespace:
         "--debug",
         action="store_true",
         help="Write optional debug artifacts under outputs/.",
+    )
+    parser.add_argument(
+        "--limit",
+        default=None,
+        type=int,
+        help="Process only the first N candidates for quick testing.",
     )
     parser.add_argument(
         "--top-k",
@@ -99,44 +148,96 @@ def main() -> int:
 
     config = RankingConfig(top_k=args.top_k)
     validate_input_path(args.candidates)
+    timings = PipelineTimings()
+    total_start = time.perf_counter()
 
     keep_k = DEBUG_TOP_K if args.debug else config.top_k
     LOGGER.info("Streaming candidates from %s", args.candidates)
-    top_candidates = _score_streaming(args.candidates, config=config, keep_k=keep_k)
+    top_candidates, processed = _score_streaming(
+        args.candidates,
+        config=config,
+        keep_k=keep_k,
+        timings=timings,
+        limit=args.limit,
+    )
     if len(top_candidates) < config.top_k:
         raise ValueError(f"Need at least {config.top_k} candidates to produce a valid submission.")
 
+    sort_start = time.perf_counter()
     sorted_candidates = _sort_best_first(top_candidates)
-    ranked_rows = _build_ranked_rows(sorted_candidates[: config.top_k])
+    timings.sort_seconds += time.perf_counter() - sort_start
 
+    reasoning_start = time.perf_counter()
+    ranked_rows = _build_ranked_rows(sorted_candidates[: config.top_k])
+    timings.reasoning_seconds += time.perf_counter() - reasoning_start
+
+    validation_start = time.perf_counter()
     validate_submission_rows(ranked_rows, expected_rows=config.top_k)
     _validate_non_increasing_scores(ranked_rows)
+    timings.validation_seconds += time.perf_counter() - validation_start
+
+    write_start = time.perf_counter()
     write_submission_csv(args.out, ranked_rows)
+    timings.write_seconds += time.perf_counter() - write_start
     LOGGER.info("Wrote %d ranked rows to %s", len(ranked_rows), args.out)
 
     if args.debug:
+        debug_start = time.perf_counter()
         _write_debug_artifacts(sorted_candidates[:DEBUG_TOP_K], output_dir=Path("outputs"))
+        timings.debug_seconds += time.perf_counter() - debug_start
 
+    external_start = time.perf_counter()
     _run_external_validator_if_present(args.out)
+    timings.external_validation_seconds += time.perf_counter() - external_start
+    _log_timing_summary(timings, processed=processed, total_elapsed=time.perf_counter() - total_start)
     return 0
 
 
-def _score_streaming(path: Path, config: RankingConfig, keep_k: int) -> list[CandidateScore]:
+def _timed_candidates(path: Path, timings: PipelineTimings, limit: int | None = None) -> Iterator[CandidateProfile]:
+    for index, candidate in enumerate(iter_candidates_jsonl(path), start=1):
+        yield candidate
+        if limit is not None and index >= limit:
+            break
+
+
+def _score_streaming(
+    path: Path,
+    config: RankingConfig,
+    keep_k: int,
+    timings: PipelineTimings | None = None,
+    limit: int | None = None,
+) -> tuple[list[CandidateScore], int]:
     heap: list[tuple[float, ReverseString, CandidateScore]] = []
     total = 0
-    for candidate in iter_candidates_jsonl(path):
+    candidate_iter = _timed_candidates(path, timings or PipelineTimings(), limit=limit)
+    while True:
+        read_start = time.perf_counter()
+        try:
+            candidate = next(candidate_iter)
+        except StopIteration:
+            break
+        if timings is not None:
+            timings.read_seconds += time.perf_counter() - read_start
         total += 1
+
+        score_start = time.perf_counter()
         breakdown = score_candidate_with_components(candidate, config)
+        if timings is not None:
+            timings.score_seconds += time.perf_counter() - score_start
+
+        heap_start = time.perf_counter()
         item = CandidateScore(candidate=candidate, breakdown=breakdown)
         heap_item = (breakdown.final_score, ReverseString(breakdown.candidate_id), item)
         if len(heap) < keep_k:
             heapq.heappush(heap, heap_item)
         else:
             heapq.heappushpop(heap, heap_item)
+        if timings is not None:
+            timings.heap_seconds += time.perf_counter() - heap_start
         if total % 10000 == 0:
             LOGGER.info("Scored %d candidates", total)
     LOGGER.info("Finished scoring %d candidates", total)
-    return [item for _score, _reverse_id, item in heap]
+    return [item for _score, _reverse_id, item in heap], total
 
 
 def _sort_best_first(items: list[CandidateScore]) -> list[CandidateScore]:
@@ -267,6 +368,14 @@ def _run_external_validator_if_present(output_path: Path) -> None:
         return
     LOGGER.info("Running external validator: %s", validator)
     subprocess.run([sys.executable, str(validator), str(output_path)], check=True)
+
+
+def _log_timing_summary(timings: PipelineTimings, processed: int, total_elapsed: float) -> None:
+    rate = processed / total_elapsed if total_elapsed > 0 else 0.0
+    slowest_stage, slowest_seconds = max(timings.as_dict().items(), key=lambda item: item[1])
+    LOGGER.info("Processed %d candidates in %.3fs (%.1f candidates/sec)", processed, total_elapsed, rate)
+    LOGGER.info("Slowest stage: %s %.3fs", slowest_stage, slowest_seconds)
+    LOGGER.debug("Timing breakdown: %s", timings.as_dict())
 
 
 def _profile(candidate: dict[str, Any]) -> dict[str, Any]:

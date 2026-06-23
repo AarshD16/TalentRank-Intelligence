@@ -94,7 +94,10 @@ class PenaltyResult:
         return self.penalty_reasons
 
 
-def calculate_penalties(candidate: EvidenceBundle | Evidence | NormalizedCandidate | dict[str, Any]) -> PenaltyResult:
+def calculate_penalties(
+    candidate: EvidenceBundle | Evidence | NormalizedCandidate | dict[str, Any],
+    evidence: Evidence | None = None,
+) -> PenaltyResult:
     """Calculate bounded penalties for suspicious or low-hireability profiles.
 
     The penalty score is normalized to 0-1 and capped at 0.75 so it can reduce a
@@ -102,8 +105,8 @@ def calculate_penalties(candidate: EvidenceBundle | Evidence | NormalizedCandida
     can decide how aggressively to apply it.
     """
     raw = _raw_candidate(candidate)
-    evidence = candidate if isinstance(candidate, Evidence) else extract_evidence(raw)
-    LOGGER.debug("Calculating penalties for candidate_id=%s", evidence.candidate_id)
+    resolved_evidence = evidence or (candidate if isinstance(candidate, Evidence) else extract_evidence(raw))
+    LOGGER.debug("Calculating penalties for candidate_id=%s", resolved_evidence.candidate_id)
 
     hard_flags: list[str] = []
     soft_flags: list[str] = []
@@ -111,17 +114,17 @@ def calculate_penalties(candidate: EvidenceBundle | Evidence | NormalizedCandida
 
     if raw:
         _check_expert_skill_duration(raw, weighted_penalties)
-        _check_ai_keyword_stuffing(raw, evidence, weighted_penalties)
+        _check_ai_keyword_stuffing(raw, resolved_evidence, weighted_penalties)
         _check_duration_consistency(raw, weighted_penalties)
-        _check_profile_mismatch(raw, evidence, weighted_penalties)
-        _check_pure_research(raw, evidence, weighted_penalties)
-        _check_salary_expectation(raw, evidence, weighted_penalties)
+        _check_profile_mismatch(raw, resolved_evidence, weighted_penalties)
+        _check_pure_research(raw, resolved_evidence, weighted_penalties)
+        _check_salary_expectation(raw, resolved_evidence, weighted_penalties)
         _check_identity_trust(raw, weighted_penalties)
 
-    _check_recent_llm_demo(evidence, weighted_penalties)
-    _check_services_only(evidence, weighted_penalties)
-    _check_inactivity_and_response(raw, evidence, weighted_penalties)
-    _check_notice_period(raw, evidence, weighted_penalties)
+    _check_recent_llm_demo(resolved_evidence, weighted_penalties)
+    _check_services_only(resolved_evidence, weighted_penalties)
+    _check_inactivity_and_response(raw, resolved_evidence, weighted_penalties)
+    _check_notice_period(raw, resolved_evidence, weighted_penalties)
 
     for _weight, reason, is_hard in weighted_penalties:
         if is_hard:

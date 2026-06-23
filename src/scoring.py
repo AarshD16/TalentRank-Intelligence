@@ -63,7 +63,7 @@ def score_candidate_with_components(
 ) -> ScoreBreakdown:
     """Score one candidate and retain transparent component scores."""
     evidence = extract_evidence(profile)
-    penalties = calculate_penalties(profile)
+    penalties = calculate_penalties(profile, evidence=evidence)
     components = {
         "role_fit_score": _role_fit_score(evidence),
         "production_ml_score": _production_ml_score(evidence),

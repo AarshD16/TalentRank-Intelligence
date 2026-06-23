@@ -42,10 +42,18 @@ This repository is currently a production-oriented skeleton. It defines the CLI,
 ## Usage
 
 ```bash
-python rank.py --input candidates.jsonl --output submission.csv
+python rank.py --candidates candidates.jsonl --out submission.csv
 ```
 
-The skeleton parses arguments and configures logging, then stops at the unimplemented ranking stage. Future implementation should fill in the TODOs inside `src/` without changing the output contract.
+## Sandbox Demo
+
+Run the lightweight recruiter-facing Streamlit demo with:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+The app accepts a JSON or JSONL candidate sample of up to 100 profiles and uses the same deterministic scoring, penalty, and reasoning logic as the CLI.
 
 ## Development
 

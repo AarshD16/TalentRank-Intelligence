@@ -9,6 +9,8 @@ from typing import Any
 
 from src.config import RankingConfig
 from src.evidence_extractor import Evidence, extract_evidence
+from src.penalties import PenaltyResult, calculate_penalties
+from src.reasoning import build_reasoning
 
 
 LOGGER = logging.getLogger(__name__)
@@ -36,6 +38,7 @@ class ScoreBreakdown:
     final_score: float
     component_scores: dict[str, float]
     evidence: Evidence
+    penalties: PenaltyResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +63,7 @@ def score_candidate_with_components(
 ) -> ScoreBreakdown:
     """Score one candidate and retain transparent component scores."""
     evidence = extract_evidence(profile)
+    penalties = calculate_penalties(profile)
     components = {
         "role_fit_score": _role_fit_score(evidence),
         "production_ml_score": _production_ml_score(evidence),
@@ -72,7 +76,7 @@ def score_candidate_with_components(
         "trust_consistency_score": _trust_consistency_score(evidence),
         "logistics_score": _logistics_score(evidence),
     }
-    final_score = _combine_components(components, config)
+    final_score = _combine_components(components, config, penalties)
     LOGGER.debug(
         "Scored candidate_id=%s final_score=%.6f components=%s",
         evidence.candidate_id,
@@ -84,6 +88,7 @@ def score_candidate_with_components(
         final_score=final_score,
         component_scores=components,
         evidence=evidence,
+        penalties=penalties,
     )
 
 
@@ -106,7 +111,13 @@ def rank_candidates(
                 candidate_id=item.candidate_id,
                 rank=index,
                 score=item.final_score,
-                reasoning=_build_scoring_reasoning(item),
+                reasoning=build_reasoning(
+                    evidence=item.evidence,
+                    penalties=item.penalties,
+                    rank=index,
+                    component_scores=item.component_scores,
+                    candidate=_candidate_by_id(candidates, item.candidate_id),
+                ),
                 component_scores=item.component_scores,
             )
         )
@@ -234,12 +245,18 @@ def _logistics_score(evidence: Evidence) -> float:
     )
 
 
-def _combine_components(components: dict[str, float], config: RankingConfig) -> float:
+def _combine_components(
+    components: dict[str, float],
+    config: RankingConfig,
+    penalties: PenaltyResult | None = None,
+) -> float:
     weights = config.resolved_scoring_weights()
     missing = set(COMPONENT_NAMES) - set(weights)
     if missing:
         raise ValueError(f"Missing scoring weights for: {sorted(missing)}")
     score = sum(components[name] * weights[name] for name in COMPONENT_NAMES)
+    if penalties is not None:
+        score *= 1.0 - min(0.75, penalties.penalty_score) * 0.55
     return round(_clamp(score), 6)
 
 
@@ -253,6 +270,13 @@ def _build_scoring_reasoning(score: ScoreBreakdown) -> str:
     production = score.evidence.signals["production_ai_experience"].snippets[:1]
     snippet = (retrieval or production or ("Transparent evidence score from profile, career, skills, and Redrob signals.",))[0]
     return f"{component_text}. Evidence: {snippet}"
+
+
+def _candidate_by_id(candidates: Sequence[dict[str, Any]], candidate_id: str) -> dict[str, Any]:
+    for candidate in candidates:
+        if str(candidate.get("candidate_id", "")).strip() == candidate_id:
+            return candidate
+    return {}
 
 
 def _clamp(value: float) -> float:

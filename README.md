@@ -139,7 +139,3 @@ docker-compose.yml
 ```bash
 python -m pytest
 ```
-
-## Git Hygiene
-
-Do not commit local secrets, full candidate datasets, generated exports, cache folders, or dependency installs. The root `.gitignore` excludes `.env`, `outputs/`, `backend/tmp/`, `backend/static_exports/`, `node_modules/`, `frontend/dist/`, Python caches, and generated submissions.

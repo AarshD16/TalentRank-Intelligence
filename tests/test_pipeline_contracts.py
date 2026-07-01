@@ -67,7 +67,7 @@ def test_strong_ai_engineer_ranks_above_keyword_stuffed_non_engineer() -> None:
     stuffed = score_candidate_with_components(_candidate("CAND_0000021"), config)
 
     assert strong.final_score > stuffed.final_score
-    assert strong.component_scores["retrieval_ranking_score"] > stuffed.component_scores["retrieval_ranking_score"]
+    assert strong.component_scores["capability_score"] > stuffed.component_scores["capability_score"]
 
 
 def test_behavioral_signals_modify_but_do_not_dominate_technical_fit() -> None:
@@ -91,7 +91,7 @@ def test_behavioral_signals_modify_but_do_not_dominate_technical_fit() -> None:
     )
     weak_score = score_candidate_with_components(weak, config)
 
-    assert weak_score.component_scores["redrob_availability_score"] > 0.8
+    assert weak_score.component_scores["redrob_hireability_score"] > 0.8
     assert strong.final_score > weak_score.final_score
 
 

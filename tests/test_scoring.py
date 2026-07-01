@@ -32,10 +32,9 @@ def test_strong_ai_engineer_scores_above_keyword_stuffed_non_engineer() -> None:
     keyword_stuffed = score_candidate_with_components(_candidate("CAND_0000021"), config)
 
     assert strong.final_score > keyword_stuffed.final_score + 0.4
-    assert strong.component_scores["retrieval_ranking_score"] > 0.8
-    assert strong.component_scores["production_ml_score"] > 0.7
-    assert keyword_stuffed.component_scores["role_fit_score"] < 0.2
-    assert keyword_stuffed.component_scores["production_ml_score"] < 0.2
+    assert strong.component_scores["capability_score"] > 0.8
+    assert 0.85 <= 0.85 + strong.component_scores["redrob_hireability_score"] * 0.30 <= 1.15
+    assert keyword_stuffed.component_scores["capability_score"] < 0.4
 
 
 def test_marketing_manager_with_many_ai_keywords_still_scores_low() -> None:
@@ -94,8 +93,8 @@ def test_marketing_manager_with_many_ai_keywords_still_scores_low() -> None:
     scored = score_candidate_with_components(stuffed_marketer, config)
 
     assert scored.final_score < strong.final_score
-    assert scored.component_scores["role_fit_score"] < 0.25
-    assert scored.component_scores["production_ml_score"] < 0.25
+    assert scored.component_scores["capability_score"] < 0.35
+    assert "cap_unrelated_title" in scored.score_flags
 
 
 def test_generic_llm_demo_profile_does_not_dominate_core_fit() -> None:
@@ -105,7 +104,7 @@ def test_generic_llm_demo_profile_does_not_dominate_core_fit() -> None:
 
     assert demo_profile.evidence.value("llm_only_recent_demo_signal") > 0.5
     assert demo_profile.final_score < strong.final_score
-    assert demo_profile.component_scores["retrieval_ranking_score"] < 0.4
+    assert demo_profile.component_scores["capability_score"] < 0.5
 
 
 def test_score_candidate_returns_normalized_float() -> None:

@@ -9,6 +9,7 @@ from datetime import date
 from typing import Any
 
 from src.normalization import NormalizedCandidate
+from src.semantic_evidence import extract_semantic_intents
 
 
 LOGGER = logging.getLogger(__name__)
@@ -102,6 +103,23 @@ RETRIEVAL_SEARCH_RANKING_TERMS = {
     "bm25",
     "semantic search",
     "information retrieval",
+    "discovery feed",
+    "personalization",
+    "personalized",
+    "learning to rank",
+    "learning-to-rank",
+    "ltr",
+    "relevance labeling",
+    "relevance labels",
+    "human relevance judgments",
+    "human judgments",
+    "relevance judgments",
+    "click-through",
+    "dwell time",
+    "recruiter feedback loop",
+    "recruiter-feedback loop",
+    "time-to-shortlist",
+    "recruiter engagement lift",
 }
 
 VECTOR_DATABASE_TERMS = {
@@ -116,6 +134,19 @@ VECTOR_DATABASE_TERMS = {
     "vector db",
     "vector index",
     "ann index",
+    "pgvector",
+    "dense retrieval",
+    "bm25 + dense retrieval",
+    "faiss hnsw",
+    "hybrid search",
+    "embedding drift",
+    "embedding versioning",
+    "index versioning",
+    "rollback paths",
+    "index refresh",
+    "nearest-neighbor",
+    "nearest neighbor",
+    "query expansion",
 }
 
 EVALUATION_TERMS = {
@@ -124,6 +155,8 @@ EVALUATION_TERMS = {
     "map",
     "precision@",
     "recall@",
+    "precision@k",
+    "recall@k",
     "offline evaluation",
     "a/b",
     "ab test",
@@ -131,6 +164,19 @@ EVALUATION_TERMS = {
     "online experiment",
     "evaluation framework",
     "ranking metrics",
+    "offline-online",
+    "offline online",
+    "offline-online correlation",
+    "offline to online",
+    "human judgments",
+    "human relevance judgments",
+    "relevance judgments",
+    "relevance labels",
+    "relevance labeling",
+    "a/b engagement metrics",
+    "a/b testing",
+    "ab testing",
+    "test interpretation",
 }
 
 PYTHON_TERMS = {"python", "pandas", "numpy", "scikit-learn", "sklearn", "fastapi"}
@@ -206,8 +252,18 @@ PRODUCT_INDUSTRIES = {
     "food delivery",
     "transportation",
     "e-commerce",
+    "ecommerce",
     "saas",
     "marketplace",
+    "edtech",
+    "adtech",
+    "insurance tech",
+    "healthtech",
+    "internet",
+    "ai/ml",
+    "ai",
+    "ml",
+    "media",
 }
 
 TARGET_LOCATIONS = {
@@ -237,6 +293,7 @@ def extract_evidence(candidate: NormalizedCandidate | dict[str, Any]) -> Evidenc
 
     LOGGER.debug("Extracting evidence for candidate_id=%s", candidate_id)
     fields = _field_texts(raw)
+    semantic = extract_semantic_intents(raw)
     production_ai = _production_ai_experience(raw, fields)
     pre_llm_ml = _pre_llm_ml_experience_signal(raw)
     signals = {
@@ -297,6 +354,36 @@ def extract_evidence(candidate: NormalizedCandidate | dict[str, Any]) -> Evidenc
         "availability_signal": _availability_signal(raw),
         "recruiter_engagement_signal": _recruiter_engagement_signal(raw),
         "profile_trust_signal": _profile_trust_signal(raw),
+        "semantic_jd_intent_score": _semantic_signal(
+            semantic.overall_score,
+            _semantic_snippets(semantic.snippets),
+            "semantic_intents.overall",
+        ),
+        "semantic_production_retrieval_score": _semantic_signal(
+            semantic.intent_scores.get("production_retrieval_ranking", 0.0),
+            semantic.snippets.get("production_retrieval_ranking", ()),
+            "semantic_intents.production_retrieval_ranking",
+        ),
+        "semantic_vector_hybrid_search_score": _semantic_signal(
+            semantic.intent_scores.get("vector_hybrid_search", 0.0),
+            semantic.snippets.get("vector_hybrid_search", ()),
+            "semantic_intents.vector_hybrid_search",
+        ),
+        "semantic_evaluation_score": _semantic_signal(
+            semantic.intent_scores.get("evaluation_frameworks", 0.0),
+            semantic.snippets.get("evaluation_frameworks", ()),
+            "semantic_intents.evaluation_frameworks",
+        ),
+        "semantic_senior_ai_engineering_score": _semantic_signal(
+            semantic.intent_scores.get("senior_ai_engineering", 0.0),
+            semantic.snippets.get("senior_ai_engineering", ()),
+            "semantic_intents.senior_ai_engineering",
+        ),
+        "semantic_product_shipping_score": _semantic_signal(
+            semantic.intent_scores.get("product_shipping_mindset", 0.0),
+            semantic.snippets.get("product_shipping_mindset", ()),
+            "semantic_intents.product_shipping_mindset",
+        ),
     }
     return Evidence(candidate_id=candidate_id, signals=signals)
 
@@ -321,6 +408,26 @@ def _unbounded_signal(value: float, snippets: list[str], source_fields: list[str
         snippets=tuple(snippets[:5]),
         source_fields=tuple(dict.fromkeys(source_fields)),
     )
+
+
+def _semantic_signal(value: float, snippets: tuple[str, ...], source_field: str) -> SignalEvidence:
+    return SignalEvidence(
+        value=round(float(max(0.0, min(value, 1.0))), 4),
+        snippets=tuple(snippets[:5]),
+        source_fields=(source_field,),
+    )
+
+
+def _semantic_snippets(snippets_by_intent: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
+    snippets: list[str] = []
+    for intent in (
+        "production_retrieval_ranking",
+        "vector_hybrid_search",
+        "evaluation_frameworks",
+        "product_shipping_mindset",
+    ):
+        snippets.extend(snippets_by_intent.get(intent, ())[:1])
+    return tuple(snippets)
 
 
 def _text(value: Any) -> str:
@@ -478,7 +585,7 @@ def _keyword_signal(
     role_hits = sum(1 for field, _term, _snippet_text in selected if field.startswith("career_history"))
     skill_hits = sum(1 for field, _term, _snippet_text in selected if field.startswith("skills") or "assessment" in field)
     profile_hits = sum(1 for field, _term, _snippet_text in selected if field.startswith("profile"))
-    value = min(1.0, role_hits * 0.35 + skill_hits * 0.18 + profile_hits * 0.22)
+    value = min(1.0, role_hits * 1.00 + profile_hits * 0.55 + skill_hits * 0.15)
     return _signal(
         value,
         [snippet for _field, _term, snippet in selected],
@@ -493,8 +600,15 @@ def _total_years(raw: dict[str, Any]) -> SignalEvidence:
 
 def _ai_ml_title_strength(raw: dict[str, Any]) -> SignalEvidence:
     profile = _profile(raw)
-    titles = [("profile.current_title", _text(profile.get("current_title")))]
-    titles.extend((f"career_history[{i}].title", _text(role.get("title"))) for i, role in enumerate(_career(raw)))
+    current_title = _text(profile.get("current_title"))
+    current_best = 0.0
+    for term, weight in AI_ML_TITLE_TERMS.items():
+        if term in current_title.lower():
+            current_best = max(current_best, weight)
+    if current_best > 0:
+        return _signal(current_best, [current_title], ["profile.current_title"])
+
+    titles = [(f"career_history[{i}].title", _text(role.get("title"))) for i, role in enumerate(_career(raw))]
     best = 0.0
     snippets: list[str] = []
     sources: list[str] = []

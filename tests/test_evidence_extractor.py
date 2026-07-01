@@ -29,6 +29,12 @@ EXPECTED_SIGNALS = {
     "availability_signal",
     "recruiter_engagement_signal",
     "profile_trust_signal",
+    "semantic_jd_intent_score",
+    "semantic_production_retrieval_score",
+    "semantic_vector_hybrid_search_score",
+    "semantic_evaluation_score",
+    "semantic_senior_ai_engineering_score",
+    "semantic_product_shipping_score",
 }
 
 

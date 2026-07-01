@@ -334,9 +334,9 @@ def _check_notice_period(
     if not notice:
         notice = 180 * (1.0 - evidence.value("notice_period_fit"))
     if notice > 90:
-        penalties.append((0.09, f"notice period is above 90 days ({notice:g})", True))
+        penalties.append((0.05, f"notice period is above 90 days ({notice:g})", False))
     elif notice > 60:
-        penalties.append((0.05, f"notice period is above 60 days ({notice:g})", False))
+        penalties.append((0.025, f"notice period is above 60 days ({notice:g})", False))
 
 
 def _check_identity_trust(

@@ -32,18 +32,12 @@ class RankingConfig:
             raise ValueError(f"Scoring weights must sum to 1.0, got {total_weight:.4f}.")
 
     def resolved_scoring_weights(self) -> dict[str, float]:
-        """Return component weights for final 0-1 scoring."""
+        """Return the four top-level scoring components used for diagnostics."""
         if self.scoring_weights is not None:
             return dict(self.scoring_weights)
         return {
-            "role_fit_score": 0.16,
-            "production_ml_score": 0.17,
-            "retrieval_ranking_score": 0.18,
-            "evaluation_score": 0.10,
-            "experience_score": 0.10,
-            "company_context_score": 0.08,
-            "skill_quality_score": 0.08,
-            "redrob_availability_score": 0.06,
+            "capability_score": 0.86,
+            "redrob_hireability_score": 0.07,
             "trust_consistency_score": 0.04,
             "logistics_score": 0.03,
         }

@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.candidate_evidence import CandidateEvidence
 from src.evidence_extractor import EvidenceBundle
 from src.penalties import PenaltyResult
+from src.rolespec import RoleSpec
 
 
 LOGGER = logging.getLogger(__name__)
@@ -67,6 +69,47 @@ def build_reasoning(
     return _csv_safe(first_sentence)
 
 
+def build_rolespec_reasoning(
+    candidate_evidence: CandidateEvidence,
+    rolespec: RoleSpec,
+    penalties: PenaltyResult,
+    rank: int | None = None,
+    candidate: dict[str, Any] | None = None,
+) -> str:
+    """Build concise JD-aware reasoning from RoleSpec priorities."""
+    facts = _candidate_facts(candidate or {})
+    opener = _opener(candidate_evidence.candidate_id, rank)
+    title = facts.get("title") or candidate_evidence.title_family
+    years = candidate_evidence.years_experience
+    positive_parts = [f"{title} with {years:g} years"]
+    positive_parts.extend(_exact_evidence_parts(candidate_evidence.legacy_evidence))
+
+    for competency in rolespec.reasoning_priorities:
+        item = candidate_evidence.competencies.get(competency)
+        if item is None or item.score < 0.35:
+            continue
+        phrase = _evidence_phrase_from_snippet(item.evidence_snippet) or _humanize_competency(competency)
+        if phrase:
+            positive_parts.append(phrase)
+        if len(positive_parts) >= 3:
+            break
+
+    missing = [
+        _humanize_competency(name)
+        for name in rolespec.must_have_competencies
+        if candidate_evidence.score(name) < 0.35
+    ]
+    concerns = _concern_parts(candidate_evidence.legacy_evidence, penalties, facts, rank)
+    if missing:
+        concerns.insert(0, f"missing stronger evidence for {', '.join(missing[:2])}")
+
+    first_sentence = f"{opener} for {rolespec.role_title}: {', '.join(_dedupe(positive_parts)[:3])}."
+    if concerns:
+        prefix = CONCERN_PREFIXES[_stable_index(candidate_evidence.candidate_id, len(CONCERN_PREFIXES), offset=3)]
+        return _csv_safe(f"{first_sentence} {prefix} {concerns[0]}.")
+    return _csv_safe(first_sentence)
+
+
 def _positive_parts(
     evidence: EvidenceBundle,
     facts: dict[str, Any],
@@ -84,16 +127,23 @@ def _positive_parts(
 
     if evidence.value("retrieval_search_ranking_experience") >= 0.65:
         parts.append(_supported_domain_phrase(evidence, "retrieval_search_ranking_experience"))
+    elif evidence.value("semantic_production_retrieval_score") >= 0.55:
+        parts.append(_supported_domain_phrase(evidence, "semantic_production_retrieval_score"))
     elif evidence.value("data_engineering_adjacent_strength") >= 0.65:
         parts.append("strong data/ML systems adjacency")
+
+    if evidence.value("semantic_vector_hybrid_search_score") >= 0.55:
+        vector_phrase = _snippet_backed_phrase(evidence, "semantic_vector_hybrid_search_score", "")
+        if vector_phrase:
+            parts.append(vector_phrase)
 
     if evidence.value("production_ai_experience") >= 0.65:
         parts.append("production ML/AI delivery evidence")
     elif evidence.value("recent_hands_on_coding_signal") >= 0.65:
         parts.append("recent hands-on technical work")
 
-    if evidence.value("evaluation_framework_experience") >= 0.45:
-        parts.append("ranking/evaluation framework evidence")
+    if evidence.value("evaluation_framework_experience") >= 0.45 or evidence.value("semantic_evaluation_score") >= 0.55:
+        parts.append(_snippet_backed_phrase(evidence, "semantic_evaluation_score", "ranking/evaluation framework evidence"))
 
     if evidence.value("python_strength") >= 0.55 and _has_skill(facts, "python"):
         parts.append("Python is explicitly listed")
@@ -102,12 +152,9 @@ def _positive_parts(
     if evidence.value("product_company_experience") >= 0.5 and product_company:
         parts.append(f"product-company experience at {product_company}")
 
-    if evidence.value("redrob_availability_signal", 0.0) >= 0.5:
-        parts.append("strong Redrob availability")
-    elif evidence.value("availability_signal") >= 0.65:
-        parts.append("recent Redrob availability signal")
-    elif component_scores.get("redrob_availability_score", 0.0) >= 0.65:
-        parts.append("strong Redrob engagement")
+    response_rate = facts.get("recruiter_response_rate")
+    if response_rate is not None and response_rate >= 0.75 and component_scores.get("redrob_hireability_score", 0.0) >= 0.70:
+        parts.append(f"recruiter response rate {response_rate:.0%}")
 
     return _dedupe(parts)
 
@@ -132,8 +179,9 @@ def _concern_parts(
         concerns.append("LLM evidence looks more demo-oriented than deep production ML")
     if evidence.value("services_only_penalty_signal") >= 0.35:
         concerns.append("IT-services-heavy background needs scrutiny against the JD")
-    if evidence.value("recruiter_engagement_signal") < 0.3:
-        concerns.append("Redrob recruiter engagement is weak")
+    response_rate = facts.get("recruiter_response_rate")
+    if response_rate is not None and response_rate < 0.2:
+        concerns.append(f"recruiter response rate is {response_rate:.0%}")
     if rank is not None and rank >= 80 and not concerns:
         concerns.append("weaker explicit ranking or production ML evidence keeps them near the cutoff")
     return _dedupe(concerns)
@@ -141,15 +189,132 @@ def _concern_parts(
 
 def _supported_domain_phrase(evidence: EvidenceBundle, signal_name: str) -> str:
     snippets = " ".join(evidence.signals[signal_name].snippets).lower()
+    exact = _exact_evidence_phrase(snippets)
+    if exact:
+        return exact
     if "recommend" in snippets:
-        return "direct recommendation-systems evidence"
+        return ""
     if "ranking" in snippets or "ranker" in snippets:
-        return "direct ranking-systems evidence"
+        return ""
     if "search" in snippets:
-        return "direct search/retrieval evidence"
+        return ""
     if "retrieval" in snippets:
-        return "direct retrieval-systems evidence"
-    return "direct retrieval/search/ranking evidence"
+        return ""
+    return ""
+
+
+def _snippet_backed_phrase(evidence: EvidenceBundle, signal_name: str, fallback: str) -> str:
+    signal = evidence.signals.get(signal_name)
+    if not signal or not signal.snippets:
+        return fallback
+    snippets = " ".join(signal.snippets).lower()
+    exact = _exact_evidence_phrase(snippets)
+    if exact:
+        return exact
+    for phrase in (
+        "discovery feed",
+        "learning-to-rank",
+        "learning to rank",
+        "semantic search",
+        "hybrid search",
+        "dense retrieval",
+        "offline-online",
+        "a/b test",
+        "a/b testing",
+        "ndcg",
+        "mrr",
+        "map",
+        "query expansion",
+        "faiss",
+        "qdrant",
+        "pinecone",
+        "weaviate",
+        "milvus",
+        "opensearch",
+        "elasticsearch",
+    ):
+        if phrase in snippets:
+            return f"{fallback} ({phrase})" if fallback else phrase
+    return fallback
+
+
+def _exact_evidence_phrase(snippets: str) -> str:
+    phrase_groups = (
+        (("50m", "queries"), "ranking pipeline serving 50M+ queries/month"),
+        (("30m", "candidate corpus"), "30M+ candidate corpus"),
+        (("8k qps",), "8K QPS serving scale"),
+        (("sub-200ms", "p95"), "sub-200ms p95 latency"),
+        (("sub 200ms", "p95"), "sub-200ms p95 latency"),
+        (("faiss hnsw",), "FAISS HNSW retrieval"),
+        (("bm25", "dense retrieval"), "BM25 + dense retrieval"),
+        (("bm25", "faiss"), "BM25 + FAISS retrieval"),
+        (("bm25", "elasticsearch"), "BM25/Elasticsearch retrieval"),
+        (("ndcg", "mrr", "recall"), "NDCG/MRR/recall@K evaluation"),
+        (("ndcg", "mrr"), "NDCG/MRR evaluation"),
+        (("mrr", "map"), "MRR/MAP evaluation"),
+        (("recall@k",), "recall@K evaluation"),
+        (("precision@k",), "precision@K evaluation"),
+        (("a/b engagement metrics",), "A/B engagement metrics"),
+        (("offline-online", "a/b"), "offline-online A/B correlation"),
+        (("offline online", "a/b"), "offline-online A/B correlation"),
+        (("offline to online",), "offline-online correlation"),
+        (("a/b testing",), "A/B testing"),
+        (("a/b test",), "A/B testing"),
+        (("ab testing",), "A/B testing"),
+        (("recommendation system",), "production recommendation system"),
+        (("discovery feed",), "discovery feed ranking"),
+        (("semantic search",), "semantic search"),
+        (("hybrid search",), "hybrid search"),
+        (("dense retrieval",), "dense retrieval"),
+        (("learning-to-rank",), "learning-to-rank"),
+        (("learning to rank",), "learning to rank"),
+        (("relevance judgments",), "relevance judgments"),
+        (("human relevance judgments",), "human relevance judgments"),
+        (("relevance labeling",), "relevance labeling"),
+        (("relevance labels",), "relevance labels"),
+        (("500k", "semantic search"), "semantic search over 500K documents"),
+        (("500k", "documents"), "semantic search over 500K documents"),
+        (("embedding versioning",), "embedding versioning"),
+        (("index versioning",), "index versioning"),
+        (("rollback paths",), "rollback paths"),
+        (("time-to-shortlist",), "time-to-shortlist improvement"),
+        (("recruiter engagement lift",), "recruiter engagement lift"),
+    )
+    for required_terms, label in phrase_groups:
+        if all(term in snippets for term in required_terms):
+            return label
+    return ""
+
+
+def _evidence_phrase_from_snippet(snippet: str) -> str:
+    lowered = snippet.lower()
+    return _exact_evidence_phrase(lowered)
+
+
+def _exact_evidence_parts(evidence: EvidenceBundle, limit: int = 3) -> list[str]:
+    ordered_signals = (
+        "evaluation_framework_experience",
+        "retrieval_search_ranking_experience",
+        "vector_database_experience",
+        "semantic_evaluation_score",
+        "semantic_production_retrieval_score",
+        "semantic_vector_hybrid_search_score",
+    )
+    parts: list[str] = []
+    for signal_name in ordered_signals:
+        signal = evidence.signals.get(signal_name)
+        if signal is None or signal.value < 0.30:
+            continue
+        phrase = _exact_evidence_phrase(" ".join(signal.snippets).lower())
+        if phrase:
+            parts.append(phrase)
+        if len(_dedupe(parts)) >= limit:
+            break
+    return _dedupe(parts)[:limit]
+
+
+def _humanize_competency(name: str) -> str:
+    return name.replace("_", " ")
 
 
 def _opener(candidate_id: str, rank: int | None) -> str:
@@ -180,7 +345,24 @@ def _candidate_facts(candidate: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(role, dict):
             continue
         industry = str(role.get("industry", "")).strip().lower()
-        if industry in {"software", "fintech", "food delivery", "transportation", "saas", "marketplace"}:
+        if industry in {
+            "software",
+            "fintech",
+            "food delivery",
+            "transportation",
+            "saas",
+            "marketplace",
+            "edtech",
+            "adtech",
+            "insurance tech",
+            "healthtech",
+            "internet",
+            "ai/ml",
+            "ai",
+            "ml",
+            "e-commerce",
+            "ecommerce",
+        }:
             product_company = str(role.get("company", "")).strip() or None
             break
     return {
@@ -188,6 +370,7 @@ def _candidate_facts(candidate: dict[str, Any]) -> dict[str, Any]:
         "skill_names": skill_names,
         "product_company": product_company,
         "notice_period_days": _safe_float_or_none(signals.get("notice_period_days")),
+        "recruiter_response_rate": _safe_float_or_none(signals.get("recruiter_response_rate")),
     }
 
 

@@ -1,0 +1,161 @@
+{
+  "role_title": "Senior AI Engineer",
+  "role_family": "ai_ml_engineering",
+  "target_seniority": "senior",
+  "experience_range": [
+    5.0,
+    9.0
+  ],
+  "must_have_competencies": [
+    "ranking_recommendation",
+    "ranking_evaluation",
+    "retrieval_search",
+    "vector_hybrid_search",
+    "production_ml_systems",
+    "python_engineering"
+  ],
+  "preferred_competencies": [
+    "ai_ml_engineering",
+    "product_management",
+    "open_source_validation"
+  ],
+  "negative_signals": [
+    "skills_only_match",
+    "unrelated_title",
+    "inactive_low_response",
+    "pure_research_without_deployment",
+    "consulting_only_background"
+  ],
+  "evidence_requirements": [
+    {
+      "name": "ranking_recommendation",
+      "min_score": 0.45,
+      "required_sources": [
+        "career_history"
+      ]
+    },
+    {
+      "name": "retrieval_search",
+      "min_score": 0.4,
+      "required_sources": [
+        "career_history"
+      ]
+    },
+    {
+      "name": "ranking_evaluation",
+      "min_score": 0.35,
+      "required_sources": [
+        "career_history"
+      ]
+    },
+    {
+      "name": "vector_hybrid_search",
+      "min_score": 0.35,
+      "required_sources": [
+        "career_history",
+        "profile"
+      ]
+    },
+    {
+      "name": "production_ml_systems",
+      "min_score": 0.4,
+      "required_sources": [
+        "career_history"
+      ]
+    }
+  ],
+  "score_caps": [
+    {
+      "rule": "skills_only_match",
+      "max_score": 0.6,
+      "applies_to": []
+    },
+    {
+      "rule": "unrelated_title_and_history",
+      "max_score": 0.5,
+      "applies_to": []
+    },
+    {
+      "rule": "no_production_evidence",
+      "max_score": 0.7,
+      "applies_to": [
+        "production_ml_systems"
+      ]
+    },
+    {
+      "rule": "no_ranking_search_recommendation_evidence",
+      "max_score": 0.78,
+      "applies_to": [
+        "ranking_recommendation",
+        "retrieval_search"
+      ]
+    },
+    {
+      "rule": "generic_ml_without_retrieval_or_evaluation",
+      "max_score": 0.82,
+      "applies_to": [
+        "ai_ml_engineering"
+      ]
+    },
+    {
+      "rule": "pure_research_without_deployment",
+      "max_score": 0.68,
+      "applies_to": [
+        "research"
+      ]
+    },
+    {
+      "rule": "recent_llm_demo_only",
+      "max_score": 0.72,
+      "applies_to": [
+        "ai_ml_engineering"
+      ]
+    },
+    {
+      "rule": "inactive_low_response",
+      "max_score": 0.75,
+      "applies_to": []
+    },
+    {
+      "rule": "consulting_only_background",
+      "max_score": 0.4,
+      "applies_to": []
+    }
+  ],
+  "redrob_signal_policy": {
+    "hireability_multiplier_min": 0.85,
+    "hireability_multiplier_max": 1.15,
+    "trust_multiplier_min": 0.95,
+    "trust_multiplier_max": 1.05,
+    "market_validation_weight": 0.05
+  },
+  "reasoning_priorities": [
+    "ranking_recommendation",
+    "ranking_evaluation",
+    "retrieval_search",
+    "vector_hybrid_search",
+    "production_ml_systems",
+    "python_engineering"
+  ],
+  "scoring_weights": {
+    "ranking_recommendation": 0.22,
+    "ranking_evaluation": 0.18,
+    "retrieval_search": 0.16,
+    "vector_hybrid_search": 0.12,
+    "production_ml_systems": 0.12,
+    "python_engineering": 0.08,
+    "ai_ml_engineering": 0.05,
+    "product_management": 0.04,
+    "open_source_validation": 0.03
+  },
+  "logistics_preferences": {
+    "preferred_locations": [
+      "Pune",
+      "Noida",
+      "Hyderabad",
+      "Mumbai",
+      "Delhi NCR"
+    ],
+    "notice_period_preference": "sub-30-days"
+  }
+}

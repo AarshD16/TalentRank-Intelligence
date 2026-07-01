@@ -1,0 +1,12 @@
+services:
+  talentrank:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./outputs:/app/outputs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
